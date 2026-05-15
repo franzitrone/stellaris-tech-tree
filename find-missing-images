@@ -1,0 +1,74 @@
+#!/bin/zsh
+
+cd "$(readlink -f "$(dirname "$0")")"
+
+VERSION="$1"
+if [ -z "$STELLARIS" ] ; then
+  STELLARIS="$2"
+fi
+
+if [ -z "$VERSION" ] || [[ "$VERSION" == "--help" ]] ; then
+  echo "Usage: $0 --help | $0 VERSION [STELLARIS_PATH]\n\
+\n\
+--help\t\tShows this help.\n\
+\n\
+VERSION\t\tThe directory at which {anomalies,engineering,physics,society}.json are located.\n\
+STELLARIS_PATH\tOptional: The path to Stellaris. The game files at this path should correspond to VERSION. Assets won't be converted and copied if not given."
+  exit -1
+fi
+
+if [ -z "$STELLARIS" ] ; then
+  echo "Won't convert and copy files due to Stellaris path not set." 1>&2
+fi
+
+echo "Checking icons..."
+EXISTING_ICONS="$(find assets/icons -maxdepth 1 -mindepth 1 -type f -iname '*.png' -print0 | rev -0 | cut -z -d/ -f1 | cut -z -d. -f2- | rev -0 | sort -z | tr '\0' '\n')\n"
+
+grep -Proh "£[^£]+£" "$VERSION" | sort | uniq | while IFS= read -r -d $'\n' line ; do
+  FILE="$(echo -n "$line" | tr -d '£')"
+  if ! echo "$EXISTING_ICONS" | grep --silent "^$FILE\$" ; then
+    if [ ! -z "$STELLARIS" ] ; then
+      IMAGE="$(find "$STELLARIS/gfx/interface/icons" -type f -iname "$FILE.dds" -print0 | head -z -n1)"
+      if [ -z "$IMAGE" ] ; then
+        IMAGE="$(find "$STELLARIS/gfx/interface/icons" -type f -iname "text_icon_$FILE.dds" -print0 | head -z -n1)"
+      fi
+      if [ -z "$IMAGE" ] ; then
+        echo "Couldn't find image for $FILE!" 1>&2
+        continue
+      fi
+      echo "Converting $IMAGE to assets/icons/$FILE.png (dds -> png)"
+      FFMPEG="$(ffmpeg -i "$IMAGE" -frames:v 1 -update 1 "assets/icons/$FILE.png" 1>/dev/null 2>&1)"
+      if [ "$?" -ne 0 ] ; then
+        if [ -f "assets/icons/$FILE.png" ] ; then
+          rm "assets/icons/$FILE.png"
+        fi
+        echo "There was an error converting $IMAGE to png!" 1>&2
+        echo "$FFMPEG" 1>&2
+      fi
+    fi
+  fi
+done
+
+echo "Checking img..."
+
+EXISTING_IMAGES="$(find assets/img -maxdepth 1 -mindepth 1 -type f -iname '*.png' -print0 | rev -0 | cut -z -d/ -f1 | cut -z -d. -f2- | rev -0 | sort -z | tr '\0' '\n')\n"
+
+jq -r '.. | .key? // empty' $VERSION/{anomalies,engineering,physics,society}.json | sort | uniq | while IFS= read -r -d $'\n' line ; do
+  FILE="$line"
+  IMAGE="$(find "$STELLARIS/gfx/interface/icons" -type f -iname "$FILE.dds" -print0 | head -z -n1)"
+  if ! echo "$EXISTING_IMAGES" | grep --silent "^$FILE\$" ; then
+    if [ -z "$IMAGE" ] ; then
+      echo "Couldn't find image for $FILE!" 1>&2
+      continue
+    fi
+    echo "Converting $IMAGE to assets/img/$FILE.png (dds -> png)"
+    FFMPEG="$(ffmpeg -i "$IMAGE" -frames:v 1 -update 1 "assets/img/$FILE.png" 1>/dev/null 2>&1)"
+    if [ "$?" -ne 0 ] ; then
+      if [ -f "assets/img/$FILE.png" ] ; then
+        rm "assets/img/$FILE.png"
+      fi
+      echo "There was an error converting $IMAGE to png!" 1>&2
+      echo "$FFMPEG" 1>&2
+    fi
+  fi
+done
